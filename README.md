@@ -1,33 +1,75 @@
-# Claude Code Sound Notifications
+<div align="center">
 
-**Claude Code notifications not working?** You're not alone.
+# 🔔 Claude Code Sound Notifications
 
-Ghostty, Zellij, tmux, Alacritty, Warp — none of them reliably deliver Claude Code's built-in terminal notifications. This fix bypasses the terminal entirely and uses your OS notification system directly.
+**Never miss when Claude finishes. Get sound + banner notifications on any terminal.**
 
-**One JSON snippet. Works on every terminal. Takes 30 seconds.**
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform: macOS | Linux](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey.svg)](#)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-2.x-blueviolet.svg)](https://claude.ai)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
+
+<br>
+
+**One command install · Works on every terminal · No dependencies**
+
+[Quick Start](#quick-start) · [Manual Setup](#manual-setup) · [Sound Profiles](#sound-profiles) · [Troubleshooting](#troubleshooting)
+
+</div>
 
 ---
 
 ## The Problem
 
-Claude Code sends notifications via **terminal escape sequences** (OSC codes). This breaks in multiple scenarios:
+Claude Code uses terminal escape sequences for notifications. **They don't work.**
 
-| Scenario | What Happens |
+| Terminal / Setup | Result |
 |---|---|
-| Ghostty with `desktop-notifications = true` | Escape sequences silently ignored |
-| Any terminal + Zellij/tmux | Multiplexer strips the sequences |
-| Alacritty, Warp, VS Code, Terminal.app | No OSC notification support at all |
-| `skipDangerousModePermissionPrompt: true` | Built-in `Notification` event never fires |
+| Ghostty (even with `desktop-notifications = true`) | ❌ Silent |
+| Any terminal + Zellij or tmux | ❌ Multiplexer strips escape codes |
+| Alacritty, Warp, VS Code, Terminal.app | ❌ No notification support |
+| `skipDangerousModePermissionPrompt: true` | ❌ `Notification` event never fires |
 
-**You finish making coffee, come back, and Claude finished 5 minutes ago. No sound. No banner. Nothing.**
+> You leave to grab coffee. You come back. Claude finished 5 minutes ago. No sound. No banner. Nothing.
+
+**This repo fixes that — permanently, on every terminal.**
 
 ---
 
-## The Fix
+## Quick Start
 
-Add a **`Stop` hook** to `~/.claude/settings.json`. It fires every time Claude finishes responding — reliably, on every terminal.
+### One-line install
 
-### macOS
+**macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/GkyEla/claude-code-sound-notifications/main/install.sh | bash
+```
+
+**Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/GkyEla/claude-code-sound-notifications/main/install.sh | bash
+```
+
+The installer will:
+- Auto-detect your OS
+- Let you pick a notification sound
+- Preview the sound before applying
+- Safely merge into your existing `settings.json` (with backup)
+
+### Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GkyEla/claude-code-sound-notifications/main/uninstall.sh | bash
+```
+
+---
+
+## Manual Setup
+
+Add the `hooks` block to `~/.claude/settings.json`:
+
+<details>
+<summary><b>macOS</b></summary>
 
 ```json
 {
@@ -47,7 +89,10 @@ Add a **`Stop` hook** to `~/.claude/settings.json`. It fires every time Claude f
 }
 ```
 
-### Linux
+</details>
+
+<details>
+<summary><b>Linux</b></summary>
 
 ```json
 {
@@ -67,7 +112,10 @@ Add a **`Stop` hook** to `~/.claude/settings.json`. It fires every time Claude f
 }
 ```
 
-### Linux (with sound)
+</details>
+
+<details>
+<summary><b>Linux (with sound)</b></summary>
 
 ```json
 {
@@ -87,17 +135,10 @@ Add a **`Stop` hook** to `~/.claude/settings.json`. It fires every time Claude f
 }
 ```
 
----
+</details>
 
-## Quick Start
-
-**1.** Open your settings file:
-
-```bash
-nano ~/.claude/settings.json
-```
-
-**2.** Add the `hooks` block from above into your existing settings. If you already have other settings, just merge the `hooks` key:
+<details>
+<summary><b>Full settings.json example</b></summary>
 
 ```json
 {
@@ -119,114 +160,143 @@ nano ~/.claude/settings.json
 }
 ```
 
-**3.** Restart Claude Code. Done.
+</details>
 
-> You can also copy the ready-to-use [`settings.example.json`](settings.example.json) from this repo.
+Restart Claude Code after saving. Run `/hooks` inside Claude Code to verify.
 
 ---
 
 ## Why `Stop` Instead of `Notification`?
 
-Claude Code has a built-in `Notification` event, but it's unreliable:
+Claude Code has a built-in `Notification` event — but it's broken for most users:
 
 | Event | When It Fires | Reliability |
 |---|---|---|
-| `Notification` | Permission prompts, idle state, auth events | Skipped when `skipDangerousModePermissionPrompt` is enabled |
-| **`Stop`** | **Every time Claude finishes a response** | **Always fires** |
+| `Notification` | Permission prompts, idle state, auth | ❌ Never fires with `skipDangerousModePermissionPrompt` |
+| **`Stop`** | **Every time Claude finishes responding** | ✅ **Always fires** |
 
-If you use dangerous mode (most power users do), `Notification` will **never fire**. `Stop` is the correct event.
+Most power users enable dangerous mode. If you do, the `Notification` event is completely dead.
+**`Stop` is the only reliable event.**
 
 ---
 
 ## How It Works
 
 ```
-Claude Code finishes responding
-        |
-        v
-  "Stop" hook fires
-        |
-        v
-  osascript / notify-send runs
-        |
-        v
-  OS Notification Center
-        |
-        v
-  Sound + Banner
+  Claude Code finishes responding
+              │
+              ▼
+       "Stop" hook fires
+              │
+              ▼
+    osascript / notify-send
+              │
+              ▼
+      OS Notification Center
+              │
+              ▼
+       Sound + Banner 🔔
 ```
 
-No terminal escape sequences. No dependency on Ghostty, Kitty, or any terminal. Direct OS-level notification.
+No terminal escape sequences. No dependency on Ghostty, Kitty, or any terminal feature.
+Direct OS-level notification that **always works**.
 
 ---
 
-## Customize the Sound (macOS)
+## Sound Profiles
 
-Replace `"Glass"` with any built-in macOS sound:
+### macOS Built-in Sounds
 
-| Sound | Vibe |
-|---|---|
-| `Glass` | Clean, subtle |
-| `Ping` | Classic notification |
-| `Pop` | Quick, light |
-| `Purr` | Soft, gentle |
-| `Hero` | Bold, triumphant |
-| `Submarine` | Deep, distinct |
-| `Frog` | Fun, unmissable |
-| `Sosumi` | The OG Mac sound |
-| `Tink` | Minimal, delicate |
+| # | Sound | Vibe | Try it |
+|---|---|---|---|
+| 1 | **Glass** | Clean, subtle | `osascript -e 'display notification "test" with title "test" sound name "Glass"'` |
+| 2 | **Ping** | Classic notification | `osascript -e 'display notification "test" with title "test" sound name "Ping"'` |
+| 3 | **Pop** | Quick, light | `osascript -e 'display notification "test" with title "test" sound name "Pop"'` |
+| 4 | **Hero** | Bold, triumphant | `osascript -e 'display notification "test" with title "test" sound name "Hero"'` |
+| 5 | **Purr** | Soft, gentle | `osascript -e 'display notification "test" with title "test" sound name "Purr"'` |
+| 6 | **Submarine** | Deep, distinct | `osascript -e 'display notification "test" with title "test" sound name "Submarine"'` |
+| 7 | **Frog** | Fun, unmissable | `osascript -e 'display notification "test" with title "test" sound name "Frog"'` |
+| 8 | **Sosumi** | The OG Mac sound | `osascript -e 'display notification "test" with title "test" sound name "Sosumi"'` |
+| 9 | **Tink** | Minimal, delicate | `osascript -e 'display notification "test" with title "test" sound name "Tink"'` |
 
-**Test a sound:**
+### Custom Sounds
 
-```bash
-osascript -e 'display notification "Test" with title "Claude Code" sound name "Hero"'
-```
+Drop any `.aiff` file into `~/Library/Sounds/` and use its filename (without extension) as the sound name.
 
 ---
 
-## Tested On
+## Tested Terminals
 
-- [x] Ghostty
-- [x] Ghostty + Zellij
-- [x] Ghostty + tmux
-- [x] Kitty
-- [x] iTerm2
-- [x] Alacritty
-- [x] Warp
-- [x] macOS Terminal.app
-- [x] VS Code integrated terminal
+| Terminal | Direct | + Zellij | + tmux |
+|---|---|---|---|
+| Ghostty | ✅ | ✅ | ✅ |
+| Kitty | ✅ | ✅ | ✅ |
+| iTerm2 | ✅ | ✅ | ✅ |
+| Alacritty | ✅ | ✅ | ✅ |
+| Warp | ✅ | ✅ | ✅ |
+| macOS Terminal | ✅ | ✅ | ✅ |
+| VS Code Terminal | ✅ | ✅ | ✅ |
 
-**Works on all of them** — because it doesn't use the terminal for notifications.
+**Works everywhere** — because it doesn't use the terminal for notifications.
 
 ---
 
 ## Troubleshooting
 
-**No sound or notification:**
-- Check **System Settings > Notifications** — make sure notifications are enabled for "Script Editor"
-- Make sure **Do Not Disturb / Focus** mode is off
-- Validate your JSON: `python3 -m json.tool ~/.claude/settings.json`
-- Restart Claude Code after editing settings
+<details>
+<summary><b>No sound or notification</b></summary>
 
-**Hook not firing:**
-- Run `/hooks` inside Claude Code to verify the hook is loaded
-- Hooks go inside `settings.json`, **not** a separate `hooks.json` file
+1. **macOS:** Check System Settings → Notifications → Script Editor — make sure it's allowed
+2. Make sure **Do Not Disturb / Focus** mode is off
+3. Validate JSON: `python3 -m json.tool ~/.claude/settings.json`
+4. Restart Claude Code after editing settings
+5. Test manually:
+   ```bash
+   # macOS
+   osascript -e 'display notification "Test" with title "Test" sound name "Glass"'
 
-**Test the notification manually:**
-```bash
-# macOS
-osascript -e 'display notification "Test" with title "Claude Code" sound name "Glass"'
+   # Linux
+   notify-send "Test" "Test"
+   ```
 
-# Linux
-notify-send "Claude Code" "Test"
-```
+</details>
+
+<details>
+<summary><b>Hook not firing</b></summary>
+
+1. Run `/hooks` inside Claude Code — verify `Stop` appears
+2. Hooks must be inside `settings.json`, **not** a separate `hooks.json` file
+3. Check for JSON syntax errors (trailing commas, missing brackets)
+
+</details>
+
+<details>
+<summary><b>Want to change the sound</b></summary>
+
+Re-run the installer or manually edit `~/.claude/settings.json` — replace the sound name in the `osascript` command.
+
+</details>
+
+---
+
+## Contributing
+
+Found a better approach? Support another OS? Improvements welcome.
+
+1. Fork this repo
+2. Make your changes
+3. Open a PR
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE) — use it however you want.
 
 ---
 
-**Found this useful?** Give it a star — it helps others find it too.
+<div align="center">
+
+**If this saved you from notification silence, give it a ⭐**
+
+</div>
