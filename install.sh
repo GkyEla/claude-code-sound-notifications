@@ -12,7 +12,6 @@ BACKUP_FILE="$HOME/.claude/settings.json.backup"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 DIM='\033[2m'
@@ -42,6 +41,11 @@ echo -e "${DIM}  OS detected:${NC} ${BOLD}$OS${NC}"
 
 # ── Check dependencies ──
 
+if ! command -v python3 &>/dev/null; then
+  echo -e "${RED}  python3 is required but not found.${NC}"
+  exit 1
+fi
+
 if [[ "$OS" == "linux" ]]; then
   if ! command -v notify-send &>/dev/null; then
     echo -e "${YELLOW}  Warning: notify-send not found. Install libnotify.${NC}"
@@ -52,6 +56,9 @@ if [[ "$OS" == "linux" ]]; then
 fi
 
 # ── Sound selection ──
+
+SOUND="Glass"
+HAS_PAPLAY="false"
 
 echo ""
 echo -e "${BOLD}  Choose a sound profile:${NC}"
@@ -84,8 +91,6 @@ if [[ "$OS" == "macos" ]]; then
     *) SOUND="Glass" ;;
   esac
 
-  HOOK_COMMAND="osascript -e 'display notification \"Claude Code finished\" with title \"Claude Code\" sound name \"$SOUND\"'"
-
   # Preview sound
   echo ""
   echo -e "${DIM}  Previewing sound...${NC}"
@@ -94,32 +99,12 @@ if [[ "$OS" == "macos" ]]; then
 else
   SOUND="default"
   if command -v paplay &>/dev/null; then
-    HOOK_COMMAND="notify-send 'Claude Code' 'Claude Code finished' --urgency=normal && paplay /usr/share/sounds/freedesktop/stereo/complete.oga"
-  else
-    HOOK_COMMAND="notify-send 'Claude Code' 'Claude Code finished' --urgency=normal"
+    HAS_PAPLAY="true"
   fi
+  echo -e "  ${DIM}Using system notification sound${NC}"
 fi
 
 echo -e "  ${GREEN}Sound: ${BOLD}$SOUND${NC}"
-
-# ── Build hook JSON ──
-
-HOOK_JSON=$(cat <<ENDJSON
-{
-  "Stop": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "$HOOK_COMMAND"
-        }
-      ]
-    }
-  ]
-}
-ENDJSON
-)
 
 # ── Check for existing settings ──
 
@@ -128,7 +113,6 @@ if [[ ! -d "$HOME/.claude" ]]; then
 fi
 
 if [[ -f "$SETTINGS_FILE" ]]; then
-  # Check if hooks already exist
   if grep -q '"Stop"' "$SETTINGS_FILE" 2>/dev/null; then
     echo ""
     echo -e "${YELLOW}  Stop hook already exists in settings.json${NC}"
@@ -143,38 +127,63 @@ if [[ -f "$SETTINGS_FILE" ]]; then
   # Backup
   cp "$SETTINGS_FILE" "$BACKUP_FILE"
   echo -e "${DIM}  Backup saved: $BACKUP_FILE${NC}"
-
-  # Merge hooks into existing settings using python (available on macOS and most Linux)
-  python3 -c "
-import json, sys
-
-with open('$SETTINGS_FILE', 'r') as f:
-    settings = json.load(f)
-
-hook = json.loads('''$HOOK_JSON''')
-
-if 'hooks' not in settings:
-    settings['hooks'] = {}
-
-settings['hooks']['Stop'] = hook['Stop']
-
-with open('$SETTINGS_FILE', 'w') as f:
-    json.dump(settings, f, indent=2)
-    f.write('\n')
-"
-
-else
-  # Create new settings file
-  python3 -c "
-import json
-
-settings = {'hooks': json.loads('''$HOOK_JSON''')}
-
-with open('$SETTINGS_FILE', 'w') as f:
-    json.dump(settings, f, indent=2)
-    f.write('\n')
-"
 fi
+
+# ── Write settings using Python (handles all escaping correctly) ──
+
+export CCNOTIF_SETTINGS_FILE="$SETTINGS_FILE"
+export CCNOTIF_OS="$OS"
+export CCNOTIF_SOUND="$SOUND"
+export CCNOTIF_HAS_PAPLAY="$HAS_PAPLAY"
+
+python3 << 'PYEOF'
+import json, os
+
+settings_file = os.environ["CCNOTIF_SETTINGS_FILE"]
+detected_os = os.environ["CCNOTIF_OS"]
+sound = os.environ["CCNOTIF_SOUND"]
+has_paplay = os.environ["CCNOTIF_HAS_PAPLAY"] == "true"
+
+# Build the command based on OS
+if detected_os == "macos":
+    hook_command = (
+        f"osascript -e 'display notification \"Claude Code finished\" "
+        f"with title \"Claude Code\" sound name \"{sound}\"'"
+    )
+else:
+    hook_command = "notify-send 'Claude Code' 'Claude Code finished' --urgency=normal"
+    if has_paplay:
+        hook_command += " && paplay /usr/share/sounds/freedesktop/stereo/complete.oga"
+
+# Load existing settings or start fresh
+if os.path.exists(settings_file):
+    with open(settings_file, "r") as f:
+        settings = json.load(f)
+else:
+    settings = {}
+
+# Build the hook
+stop_hook = [
+    {
+        "matcher": "",
+        "hooks": [
+            {
+                "type": "command",
+                "command": hook_command
+            }
+        ]
+    }
+]
+
+if "hooks" not in settings:
+    settings["hooks"] = {}
+
+settings["hooks"]["Stop"] = stop_hook
+
+with open(settings_file, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+PYEOF
 
 # ── Done ──
 
