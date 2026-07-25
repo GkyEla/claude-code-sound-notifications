@@ -7,6 +7,7 @@ set -euo pipefail
 
 SETTINGS_FILE="$HOME/.claude/settings.json"
 BACKUP_FILE="$HOME/.claude/settings.json.backup"
+HOOK_MARKER="# claude-code-sound-notifications"
 
 # Colors
 RED='\033[0;31m'
@@ -112,21 +113,9 @@ if [[ ! -d "$HOME/.claude" ]]; then
   mkdir -p "$HOME/.claude"
 fi
 
+HAD_SETTINGS="false"
 if [[ -f "$SETTINGS_FILE" ]]; then
-  if grep -q '"Stop"' "$SETTINGS_FILE" 2>/dev/null; then
-    echo ""
-    echo -e "${YELLOW}  Stop hook already exists in settings.json${NC}"
-    echo -ne "  ${BOLD}Overwrite? [y/N]: ${NC}"
-    read -r overwrite
-    if [[ "${overwrite}" != "y" && "${overwrite}" != "Y" ]]; then
-      echo -e "${DIM}  Aborted.${NC}"
-      exit 0
-    fi
-  fi
-
-  # Backup
-  cp "$SETTINGS_FILE" "$BACKUP_FILE"
-  echo -e "${DIM}  Backup saved: $BACKUP_FILE${NC}"
+  HAD_SETTINGS="true"
 fi
 
 # ── Write settings using Python (handles all escaping correctly) ──
@@ -135,14 +124,75 @@ export CCNOTIF_SETTINGS_FILE="$SETTINGS_FILE"
 export CCNOTIF_OS="$OS"
 export CCNOTIF_SOUND="$SOUND"
 export CCNOTIF_HAS_PAPLAY="$HAS_PAPLAY"
+export CCNOTIF_BACKUP_FILE="$BACKUP_FILE"
+export CCNOTIF_HOOK_MARKER="$HOOK_MARKER"
 
 python3 << 'PYEOF'
-import json, os
+import json
+import os
+import shutil
+import tempfile
 
 settings_file = os.environ["CCNOTIF_SETTINGS_FILE"]
+backup_file = os.environ["CCNOTIF_BACKUP_FILE"]
 detected_os = os.environ["CCNOTIF_OS"]
 sound = os.environ["CCNOTIF_SOUND"]
 has_paplay = os.environ["CCNOTIF_HAS_PAPLAY"] == "true"
+hook_marker = os.environ["CCNOTIF_HOOK_MARKER"]
+
+legacy_linux_commands = {
+    "notify-send 'Claude Code' 'Claude Code finished' --urgency=normal",
+    "notify-send 'Claude Code' 'Claude Code finished' --urgency=normal && "
+    "paplay /usr/share/sounds/freedesktop/stereo/complete.oga",
+}
+
+
+def is_legacy_macos_command(command):
+    prefix = "osascript -e 'display notification \"Claude Code finished\" "
+    sound_prefix = "with title \"Claude Code\" sound name \""
+    return (
+        command.startswith(prefix + sound_prefix)
+        and command.endswith("\"'")
+        and len(command) > len(prefix + sound_prefix) + 2
+        and "\"" not in command[len(prefix + sound_prefix):-2]
+    )
+
+
+def is_owned_entry(entry):
+    if not isinstance(entry, dict) or entry.get("matcher") != "":
+        return False
+    hooks = entry.get("hooks")
+    if not isinstance(hooks, list) or len(hooks) != 1:
+        return False
+    hook = hooks[0]
+    if not isinstance(hook, dict) or hook.get("type") != "command":
+        return False
+    command = hook.get("command")
+    if not isinstance(command, str):
+        return False
+    if hook_marker in command:
+        return True
+    if set(entry) != {"matcher", "hooks"} or set(hook) != {"type", "command"}:
+        return False
+    return command in legacy_linux_commands or is_legacy_macos_command(command)
+
+
+def write_atomically(path, value):
+    directory = os.path.dirname(path)
+    file_descriptor, temporary_path = tempfile.mkstemp(
+        dir=directory, prefix="settings.json.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(file_descriptor, "w") as temporary_file:
+            json.dump(value, temporary_file, indent=2)
+            temporary_file.write("\n")
+        os.replace(temporary_path, path)
+    except BaseException:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
 
 # Build the command based on OS
 if detected_os == "macos":
@@ -154,36 +204,44 @@ else:
     hook_command = "notify-send 'Claude Code' 'Claude Code finished' --urgency=normal"
     if has_paplay:
         hook_command += " && paplay /usr/share/sounds/freedesktop/stereo/complete.oga"
+hook_command += f" {hook_marker}"
 
 # Load existing settings or start fresh
 if os.path.exists(settings_file):
-    with open(settings_file, "r") as f:
-        settings = json.load(f)
+    try:
+        with open(settings_file, "r") as settings_handle:
+            settings = json.load(settings_handle)
+    except (OSError, json.JSONDecodeError) as error:
+        raise SystemExit(f"Cannot safely update invalid settings JSON: {error}")
 else:
     settings = {}
 
-# Build the hook
-stop_hook = [
-    {
-        "matcher": "",
-        "hooks": [
-            {
-                "type": "command",
-                "command": hook_command
-            }
-        ]
-    }
-]
+if not isinstance(settings, dict):
+    raise SystemExit("Cannot safely update settings JSON: root must be an object")
 
-if "hooks" not in settings:
-    settings["hooks"] = {}
+hooks = settings.setdefault("hooks", {})
+if not isinstance(hooks, dict):
+    raise SystemExit("Cannot safely update settings JSON: hooks must be an object")
 
-settings["hooks"]["Stop"] = stop_hook
+stop_hooks = hooks.setdefault("Stop", [])
+if not isinstance(stop_hooks, list):
+    raise SystemExit("Cannot safely update settings JSON: hooks.Stop must be an array")
 
-with open(settings_file, "w") as f:
-    json.dump(settings, f, indent=2)
-    f.write("\n")
+stop_hooks[:] = [entry for entry in stop_hooks if not is_owned_entry(entry)]
+stop_hooks.append({
+    "matcher": "",
+    "hooks": [{"type": "command", "command": hook_command}],
+})
+
+if os.path.exists(settings_file):
+    shutil.copy2(settings_file, backup_file)
+
+write_atomically(settings_file, settings)
 PYEOF
+
+if [[ "$HAD_SETTINGS" == "true" ]]; then
+  echo -e "${DIM}  Backup saved: $BACKUP_FILE${NC}"
+fi
 
 # ── Done ──
 
