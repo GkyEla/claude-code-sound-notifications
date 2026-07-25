@@ -54,13 +54,16 @@ The installer will:
 - Auto-detect your OS
 - Let you pick a notification sound
 - Preview the sound before applying
-- Safely merge into your existing `settings.json` (with backup)
+- Add or update only this project's `Stop` hook
+- Preserve other tools' hooks and back up `settings.json` before changes
 
 ### Uninstall
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GkyEla/claude-code-sound-notifications/main/uninstall.sh | bash
 ```
+
+The uninstaller removes only this project's notification hook and preserves unrelated `Stop` hooks.
 
 ---
 
